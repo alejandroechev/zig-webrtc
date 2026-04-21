@@ -17,6 +17,9 @@ pub fn build(b: *std.Build) void {
     mod.addObjectFile(.{ .cwd_relative = "C:/Program Files/OpenSSL-Win64/lib/VC/x64/MD/libssl.lib" });
     mod.addObjectFile(.{ .cwd_relative = "C:/Program Files/OpenSSL-Win64/lib/VC/x64/MD/libcrypto.lib" });
 
+    // Winsock2 (for transport module)
+    mod.linkSystemLibrary("ws2_32", .{});
+
     // Static library artifact
     const lib = b.addLibrary(.{
         .name = "zig-webrtc",

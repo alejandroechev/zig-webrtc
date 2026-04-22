@@ -19,6 +19,11 @@ WebSocket messages between Zig peer and browser peer.
 { "type": "ice-candidate", "candidate": { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 } }
 ```
 
+### STT Result (Browser → Zig)
+```json
+{ "type": "stt-result", "text": "hello from zig webrtc", "confidence": 0.95 }
+```
+
 ## Flow
 1. Zig connects to ws://localhost:8080
 2. Browser connects to ws://localhost:8080

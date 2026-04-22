@@ -8,6 +8,9 @@ const httpServer = http.createServer((req, res) => {
   if (req.url === '/' || req.url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(fs.readFileSync(path.join(__dirname, 'browser-client.html')));
+  } else if (req.url === '/audio-test') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(fs.readFileSync(path.join(__dirname, 'browser-audio-test.html')));
   } else {
     res.writeHead(404);
     res.end('Not found');

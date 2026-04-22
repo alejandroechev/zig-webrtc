@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head><title>WebRTC Audio E2E Test</title></head>
+<body>
+  <h1>WebRTC Audio E2E Test (STT Verification)</h1>
+  <div id="status">Waiting...</div>
+  <div id="ice-state">ICE: new</div>
+  <div id="audio-state">Audio: waiting</div>
+  <div id="transcript">Transcript: (listening...)</div>
+  <div id="result" data-result=""></div>
+  <audio id="audioPlayer" autoplay></audio>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const iceStateEl = document.getElementById('ice-state');
+    const audioStateEl = document.getElementById('audio-state');
+    const transcriptEl = document.getElementById('transcript');
+    const resultEl = document.getElementById('result');
+    const audioPlayer = document.getElementById('audioPlayer');
+
+    let pc = null;
+    let recognitionStarted = false;
+
+    // --- WebSocket signaling ---
+    const ws = new WebSocket('ws://localhost:8080?role=browser');
+
+    ws.onopen = () => {
+      statusEl.textContent = 'Connected to signaling server. Waiting for Zig peer...';
+
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      pc.onconnectionstatechange = () => {
+        statusEl.textContent = 'Connection: ' + pc.connectionState;
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        iceStateEl.textContent = 'ICE: ' + pc.iceConnectionState;
+      };
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          ws.send(JSON.stringify({ type: 'ice-candidate', candidate: e.candidate }));
+        }
+      };
+
+      // When remote audio track arrives
+      pc.ontrack = (event) => {
+        if (event.track.kind === 'audio') {
+          audioStateEl.textContent = 'Audio: receiving!';
+          const stream = event.streams[0] || new MediaStream([event.track]);
+          audioPlayer.srcObject = stream;
+          document.body.setAttribute('data-audio-track', 'received');
+          startSpeechRecognition();
+        }
+      };
+    };
+
+    ws.onmessage = async (e) => {
+      const msg = JSON.parse(e.data);
+
+      if (msg.type === 'offer') {
+        statusEl.textContent = 'Received offer from Zig peer';
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+        statusEl.textContent = 'Sent answer, waiting for ICE...';
+      }
+
+      if (msg.type === 'ice-candidate' && msg.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+      }
+    };
+
+    ws.onerror = (err) => {
+      statusEl.textContent = 'WebSocket error';
+    };
+
+    ws.onclose = () => {
+      statusEl.textContent = 'Signaling connection closed';
+    };
+
+    // --- STT via Web Speech API ---
+    function startSpeechRecognition() {
+      if (recognitionStarted) return;
+      recognitionStarted = true;
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        transcriptEl.textContent = 'Transcript: (Speech API not available)';
+        return;
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        let finalTranscript = '';
+        let interimTranscript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            finalTranscript += result[0].transcript;
+          } else {
+            interimTranscript += result[0].transcript;
+          }
+        }
+
+        const displayText = finalTranscript || interimTranscript;
+        transcriptEl.textContent = 'Transcript: ' + displayText;
+        resultEl.setAttribute('data-result', displayText);
+
+        // Send final results to signaling for test harness
+        if (finalTranscript && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'stt-result',
+            text: finalTranscript.toLowerCase().trim(),
+            confidence: event.results[event.results.length - 1][0].confidence || 0
+          }));
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('Speech recognition error:', event.error);
+        // Restart on recoverable errors
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+          setTimeout(() => {
+            try { recognition.start(); } catch (e) { /* already started */ }
+          }, 500);
+        }
+      };
+
+      recognition.onend = () => {
+        // Auto-restart continuous recognition
+        setTimeout(() => {
+          try { recognition.start(); } catch (e) { /* already started */ }
+        }, 500);
+      };
+
+      try {
+        recognition.start();
+        transcriptEl.textContent = 'Transcript: (listening...)';
+      } catch (e) {
+        transcriptEl.textContent = 'Transcript: (failed to start: ' + e.message + ')';
+      }
+    }
+  </script>
+</body>
+</html>

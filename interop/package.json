@@ -6,6 +6,7 @@
     "test:sdp": "node test-sdp-exchange.js",
     "test:interop": "node test-interop.js",
     "test:audio": "node test-audio-sdp.js",
+    "test:audio-e2e": "node test-audio-e2e.js",
     "server": "node signaling-server.js"
   },
   "dependencies": {

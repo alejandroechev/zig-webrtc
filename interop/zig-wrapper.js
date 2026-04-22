@@ -90,7 +90,8 @@ agent.stdout.on("data", (data) => {
         msg.type === "answer" ||
         msg.type === "ice-candidate" ||
         msg.type === "data" ||
-        msg.type === "audio-status"
+        msg.type === "audio-status" ||
+        msg.type === "stt-result"
       ) {
         // Forward to signaling
         if (wsOpen && ws.readyState === WebSocket.OPEN) {

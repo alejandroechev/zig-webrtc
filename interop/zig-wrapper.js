@@ -17,7 +17,7 @@ const { spawn } = require("child_process");
 const WebSocket = require("ws");
 const path = require("path");
 
-const SIGNALING_URL = process.argv[2] || "ws://localhost:8080";
+const SIGNALING_URL = process.argv[2] || "ws://localhost:8080?role=zig";
 const ZIG_BIN = path.join(
   __dirname,
   "..",
@@ -46,9 +46,18 @@ agent.on("exit", (code) => {
 
 // Connect to signaling server
 const ws = new WebSocket(SIGNALING_URL);
+let wsOpen = false;
+const pendingMessages = [];
 
 ws.on("open", () => {
   console.log("[wrapper] connected to signaling server");
+  wsOpen = true;
+  // Flush any messages that arrived before WS was open
+  for (const msg of pendingMessages) {
+    ws.send(msg);
+    console.log(`[wrapper] zig → signaling: ${JSON.parse(msg).type} (flushed)`);
+  }
+  pendingMessages.length = 0;
 });
 
 ws.on("error", (err) => {
@@ -83,13 +92,12 @@ agent.stdout.on("data", (data) => {
         msg.type === "data"
       ) {
         // Forward to signaling
-        if (ws.readyState === WebSocket.OPEN) {
+        if (wsOpen && ws.readyState === WebSocket.OPEN) {
           ws.send(trimmed);
           console.log(`[wrapper] zig → signaling: ${msg.type}`);
         } else {
-          console.warn(
-            `[wrapper] WebSocket not open, dropping: ${msg.type}`
-          );
+          pendingMessages.push(trimmed);
+          console.log(`[wrapper] zig → signaling: ${msg.type} (queued, WS not ready)`);
         }
       } else if (msg.type === "status") {
         console.log(`[wrapper] agent status: ${msg.message}`);

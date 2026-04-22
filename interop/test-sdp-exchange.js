@@ -149,42 +149,40 @@ async function runSdpExchangeTest() {
 
     const result = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new Error("Timeout waiting for SDP offer"));
+        reject(new Error("Timeout waiting for SDP exchange"));
       }, TIMEOUT_MS);
 
-      ws = new WebSocket(`ws://localhost:${SIGNALING_PORT}`);
+      ws = new WebSocket(`ws://localhost:${SIGNALING_PORT}?role=browser`);
 
       ws.on("error", (err) => {
         clearTimeout(timer);
         reject(new Error(`WebSocket error: ${err.message}`));
       });
 
+      let offerValidated = false;
+
       ws.on("message", (data) => {
         const msg = JSON.parse(data.toString());
 
-        if (msg.type === "offer") {
+        if (msg.type === "offer" && !offerValidated) {
           console.log("  Received SDP offer from Zig agent");
 
           // 4. Validate the SDP
           validateZigSdpOffer(msg.sdp);
+          offerValidated = true;
 
           // 5. Send mock answer
           const answer = createMockAnswer(msg.sdp);
           console.log("  Sending mock SDP answer...");
           ws.send(JSON.stringify({ type: "answer", sdp: answer }));
+        }
 
-          // 6. Wait for Zig to acknowledge
-          ws.on("message", (data2) => {
-            const msg2 = JSON.parse(data2.toString());
-            if (msg2.type === "status" && msg2.message === "answer-applied") {
-              console.log("  ✅ Zig agent processed the answer successfully");
-              clearTimeout(timer);
-              resolve({ success: true });
-            }
-            if (msg2.type === "status" && msg2.message === "ready") {
-              console.log("  ✅ Zig agent reached ready state");
-            }
-          });
+        // The Zig agent sends a data message after processing the answer
+        // (status messages stay in the wrapper, only offer/answer/ice/data are relayed)
+        if (msg.type === "data" && offerValidated) {
+          console.log(`  ✅ Zig agent sent data: "${msg.message}"`);
+          clearTimeout(timer);
+          resolve({ success: true, zigMessage: msg.message });
         }
       });
     });

@@ -17,6 +17,18 @@ pub fn build(b: *std.Build) void {
     mod.addObjectFile(.{ .cwd_relative = "C:/Program Files/OpenSSL-Win64/lib/VC/x64/MD/libssl.lib" });
     mod.addObjectFile(.{ .cwd_relative = "C:/Program Files/OpenSSL-Win64/lib/VC/x64/MD/libcrypto.lib" });
 
+    // vcpkg: Opus and VPX codec libraries
+    mod.addIncludePath(.{ .cwd_relative = "C:/vcpkg/installed/x64-windows/include" });
+    mod.addObjectFile(.{ .cwd_relative = "C:/vcpkg/installed/x64-windows/lib/opus.lib" });
+    mod.addIncludePath(.{ .cwd_relative = "C:/vcpkg/installed/x64-windows-static-noltcg/include" });
+    mod.addObjectFile(.{ .cwd_relative = "C:/vcpkg/installed/x64-windows-static-noltcg/lib/vpx.lib" });
+
+    // Stub libs (empty MSVCRT.lib etc.) satisfy /DEFAULTLIB from MSVC static libs
+    mod.addLibraryPath(.{ .cwd_relative = "lib/stubs" });
+
+    // MSVC compat shim: _fltused + _setjmp bridge for OpenSSL and vpx.lib
+    mod.addCSourceFile(.{ .file = b.path("lib/stubs/msvc_compat.c") });
+
     // Winsock2 (for transport module)
     mod.linkSystemLibrary("ws2_32", .{});
 

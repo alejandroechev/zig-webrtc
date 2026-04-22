@@ -1,0 +1,11 @@
+test
++- run test failure
+error: test process unexpectedly exited with code 53
+failed command: ".\\.zig-cache\\o\\80b10607852dd5efe500ae6228b4b398\\test.exe" "--cache-dir=.\\.zig-cache" --seed=0x3a1d9fc1 --listen=-
+
+Build Summary: 1/3 steps succeeded (1 failed)
+test transitive failure
++- run test failure
+
+error: the following build command failed with exit code 1:
+.zig-cache\o\14d868e9d0c691cc30c31cc26276aa84\build.exe C:\Users\alejandroe\AppData\Local\Microsoft\WinGet\Packages\zig.zig_Microsoft.Winget.Source_8wekyb3d8bbwe\zig-x86_64-windows-0.16.0\zig.exe C:\Users\alejandroe\AppData\Local\Microsoft\WinGet\Packages\zig.zig_Microsoft.Winget.Source_8wekyb3d8bbwe\zig-x86_64-windows-0.16.0\lib C:\Local\Code\ai-personal\zig-webrtc .zig-cache C:\Users\alejandroe\AppData\Local\zig --seed 0x3a1d9fc1 -Z5682b470b3fb84ce test

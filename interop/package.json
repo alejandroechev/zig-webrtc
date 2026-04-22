@@ -10,6 +10,7 @@
     "server": "node signaling-server.js"
   },
   "dependencies": {
+    "playwright": "^1.59.1",
     "ws": "^8.0.0"
   }
 }

@@ -18,7 +18,7 @@ const path = require("path");
 
 const SIGNALING_WS_PORT = 8080;
 const SIGNALING_HTTP_PORT = 8081;
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = 120_000;
 const ZIG_BUILD_TIMEOUT_MS = 120_000;
 
 // ── Process Management ──────────────────────────────────────────────
@@ -90,9 +90,11 @@ function startSignalingServer() {
 }
 
 function startZigWrapper() {
+  const mediaAgentBin = path.join(__dirname, "..", "zig-out", "bin", "zig-webrtc-media-agent.exe");
   const proc = spawn("node", [path.join(__dirname, "zig-wrapper.js")], {
     stdio: ["ignore", "pipe", "pipe"],
     cwd: path.join(__dirname, ".."),
+    env: { ...process.env, ZIG_AGENT_BIN: mediaAgentBin },
   });
   return proc;
 }

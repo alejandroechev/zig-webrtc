@@ -18,7 +18,7 @@ const WebSocket = require("ws");
 const path = require("path");
 
 const SIGNALING_URL = process.argv[2] || "ws://localhost:8080?role=zig";
-const ZIG_BIN = path.join(
+const ZIG_BIN = process.env.ZIG_AGENT_BIN || path.join(
   __dirname,
   "..",
   "zig-out",

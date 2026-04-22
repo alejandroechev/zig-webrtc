@@ -84,4 +84,23 @@ pub fn build(b: *std.Build) void {
     const interop_run = b.addRunArtifact(interop_exe);
     const interop_step = b.step("interop", "Run the interop agent");
     interop_step.dependOn(&interop_run.step);
+
+    // Media agent executable (real UDP + ICE-lite + DTLS + SRTP audio)
+    const media_agent = b.addExecutable(.{
+        .name = "zig-webrtc-media-agent",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/interop/media_agent.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "zig-webrtc", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(media_agent);
+
+    const media_run = b.addRunArtifact(media_agent);
+    const media_step = b.step("media-agent", "Run the media agent");
+    media_step.dependOn(&media_run.step);
 }

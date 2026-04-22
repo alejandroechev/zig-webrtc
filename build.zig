@@ -53,4 +53,23 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the example");
     run_step.dependOn(&run_cmd.step);
+
+    // Interop agent executable (stdin/stdout signaling bridge)
+    const interop_exe = b.addExecutable(.{
+        .name = "zig-webrtc-interop",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/interop/agent.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "zig-webrtc", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(interop_exe);
+
+    const interop_run = b.addRunArtifact(interop_exe);
+    const interop_step = b.step("interop", "Run the interop agent");
+    interop_step.dependOn(&interop_run.step);
 }

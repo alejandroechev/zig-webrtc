@@ -1,6 +1,12 @@
 {
   "name": "zig-webrtc-interop",
   "private": true,
+  "scripts": {
+    "test": "node run-tests.js",
+    "test:sdp": "node test-sdp-exchange.js",
+    "test:interop": "node test-interop.js",
+    "server": "node signaling-server.js"
+  },
   "dependencies": {
     "ws": "^8.0.0"
   }

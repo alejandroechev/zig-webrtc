@@ -34,3 +34,38 @@ zig build
 zig build test
 zig build run
 ```
+
+## Interop Testing
+
+End-to-end tests that validate the Zig WebRTC stack against a real browser peer.
+
+### Prerequisites
+- Node.js 20+
+- Zig 0.16+
+- Chrome or Chromium (optional — for full browser interop via Playwright)
+
+### Running tests
+
+```bash
+# Build the Zig agent
+zig build
+
+# Install Node dependencies
+cd interop && npm install
+
+# Run all interop tests
+npm test
+
+# Run just SDP exchange validation (no browser needed)
+npm run test:sdp
+
+# Run full data channel interop test
+npm run test:interop
+```
+
+### Test suite
+
+| Test | What it validates |
+|------|-------------------|
+| **SDP Exchange** | Zig agent produces a valid SDP offer (v=, o=, m=, ICE, BUNDLE, setup:actpass), accepts a mock answer |
+| **Data Channel Interop** | Full signaling flow: build → offer → answer → data message exchange |

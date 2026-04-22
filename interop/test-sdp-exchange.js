@@ -44,34 +44,54 @@ function validateZigSdpOffer(sdp) {
 
 function createMockAnswer(offerSdp) {
   // Build a minimal valid SDP answer from the offer.
-  // Extract ice-ufrag and ice-pwd from the offer so the answer references them.
-  const ufragMatch = offerSdp.match(/a=ice-ufrag:(\S+)/);
-  const pwdMatch = offerSdp.match(/a=ice-pwd:(\S+)/);
-  const fingerprintMatch = offerSdp.match(/a=fingerprint:(\S+ \S+)/);
-
   const ufrag = "mock" + Math.random().toString(36).slice(2, 8);
   const pwd = "mockpwd" + Math.random().toString(36).slice(2, 18);
+  const fingerprintMatch = offerSdp.match(/a=fingerprint:(\S+ \S+)/);
   const fingerprint = fingerprintMatch
     ? fingerprintMatch[1]
     : "sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00";
 
-  return [
+  // Detect if the offer includes an audio m= line
+  const hasAudio = offerSdp.includes("m=audio");
+
+  const lines = [
     "v=0",
     "o=- 1234567890 2 IN IP4 127.0.0.1",
     "s=-",
     "t=0 0",
-    "a=group:BUNDLE 0",
-    "a=msid-semantic: WMS",
-    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
-    "c=IN IP4 0.0.0.0",
-    "a=ice-ufrag:" + ufrag,
-    "a=ice-pwd:" + pwd,
-    "a=fingerprint:" + fingerprint,
-    "a=setup:active",
-    "a=mid:0",
-    "a=sctp-port:5000",
-    "",
-  ].join("\r\n");
+  ];
+
+  if (hasAudio) {
+    lines.push("a=group:BUNDLE 0 1");
+    lines.push("a=msid-semantic: WMS");
+    lines.push("m=audio 9 UDP/TLS/RTP/SAVPF 111");
+    lines.push("c=IN IP4 0.0.0.0");
+    lines.push("a=ice-ufrag:" + ufrag);
+    lines.push("a=ice-pwd:" + pwd);
+    lines.push("a=fingerprint:" + fingerprint);
+    lines.push("a=setup:active");
+    lines.push("a=mid:0");
+    lines.push("a=rtpmap:111 opus/48000/2");
+    lines.push("a=fmtp:111 minptime=10;useinbandfec=1");
+    lines.push("m=application 9 UDP/DTLS/SCTP webrtc-datachannel");
+    lines.push("c=IN IP4 0.0.0.0");
+    lines.push("a=mid:1");
+    lines.push("a=sctp-port:5000");
+  } else {
+    lines.push("a=group:BUNDLE 0");
+    lines.push("a=msid-semantic: WMS");
+    lines.push("m=application 9 UDP/DTLS/SCTP webrtc-datachannel");
+    lines.push("c=IN IP4 0.0.0.0");
+    lines.push("a=ice-ufrag:" + ufrag);
+    lines.push("a=ice-pwd:" + pwd);
+    lines.push("a=fingerprint:" + fingerprint);
+    lines.push("a=setup:active");
+    lines.push("a=mid:0");
+    lines.push("a=sctp-port:5000");
+  }
+
+  lines.push("");
+  return lines.join("\r\n");
 }
 
 // ── Process Management ──────────────────────────────────────────────

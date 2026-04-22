@@ -6,6 +6,15 @@
   <div id="status">Connecting to signaling server...</div>
   <div id="connection-state">Connection: new</div>
   <div id="ice-state">ICE: new</div>
+
+  <h3>Audio</h3>
+  <div id="audio-status">Audio: waiting for track</div>
+  <div id="audio-indicator" style="width:20px;height:20px;border-radius:50%;background:#ccc;display:inline-block;"></div>
+  <span id="audio-indicator-label">No audio</span>
+  <div id="codec-info">Codec: —</div>
+  <audio id="remoteAudio" autoplay></audio>
+
+  <h3>Data Channel</h3>
   <div id="messages"></div>
   <button id="sendBtn" disabled>Send "Hello from browser!"</button>
 
@@ -15,6 +24,11 @@
     const iceState = document.getElementById('ice-state');
     const messages = document.getElementById('messages');
     const sendBtn = document.getElementById('sendBtn');
+    const audioStatus = document.getElementById('audio-status');
+    const audioIndicator = document.getElementById('audio-indicator');
+    const audioIndicatorLabel = document.getElementById('audio-indicator-label');
+    const codecInfo = document.getElementById('codec-info');
+    const remoteAudio = document.getElementById('remoteAudio');
 
     const ws = new WebSocket('ws://localhost:8080');
     let pc, dc;
@@ -44,6 +58,17 @@
         dc = e.channel;
         setupDataChannel(dc);
       };
+
+      // Handle incoming audio/video tracks
+      pc.ontrack = (e) => {
+        if (e.track.kind === 'audio') {
+          audioStatus.textContent = 'Audio: track received (' + e.track.id + ')';
+          audioIndicator.style.background = '#4CAF50';
+          audioIndicatorLabel.textContent = 'Audio track active';
+          remoteAudio.srcObject = e.streams[0] || new MediaStream([e.track]);
+          document.body.setAttribute('data-audio-track', 'received');
+        }
+      };
     };
 
     ws.onmessage = async (e) => {
@@ -51,6 +76,10 @@
 
       if (msg.type === 'offer') {
         status.textContent = 'Received offer from Zig peer';
+
+        // Parse codec info from SDP before setting it
+        parseCodecInfo(msg.sdp);
+
         await pc.setRemoteDescription(new RTCSessionDescription(msg));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -61,7 +90,39 @@
       if (msg.type === 'ice-candidate' && msg.candidate) {
         await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
       }
+
+      if (msg.type === 'audio-status') {
+        audioStatus.textContent = 'Audio: ' + msg.message +
+          ' (packets=' + (msg.packets || 0) + ', bytes=' + (msg.bytes || 0) + ')';
+        if (msg.packets > 0) {
+          audioIndicator.style.background = '#2196F3';
+          audioIndicatorLabel.textContent = msg.packets + ' packets encoded';
+          document.body.setAttribute('data-audio-encoded', msg.packets);
+        }
+      }
     };
+
+    function parseCodecInfo(sdp) {
+      const lines = sdp.split(/\r?\n/);
+      const codecs = [];
+      let hasAudio = false;
+      let hasDataChannel = false;
+
+      for (const line of lines) {
+        if (line.startsWith('m=audio')) hasAudio = true;
+        if (line.startsWith('m=application')) hasDataChannel = true;
+        if (line.startsWith('a=rtpmap:')) {
+          codecs.push(line.replace('a=rtpmap:', ''));
+        }
+      }
+
+      let info = 'Codec: ';
+      if (hasAudio) info += '🔊 Audio ';
+      if (hasDataChannel) info += '📡 DataChannel ';
+      if (codecs.length > 0) info += '| ' + codecs.join(', ');
+      codecInfo.textContent = info;
+      document.body.setAttribute('data-has-audio-sdp', hasAudio ? 'true' : 'false');
+    }
 
     function setupDataChannel(channel) {
       channel.onopen = () => {

@@ -5,6 +5,7 @@
     "test": "node run-tests.js",
     "test:sdp": "node test-sdp-exchange.js",
     "test:interop": "node test-interop.js",
+    "test:audio": "node test-audio-sdp.js",
     "server": "node signaling-server.js"
   },
   "dependencies": {

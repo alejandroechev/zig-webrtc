@@ -5,6 +5,7 @@
 
 const { runSdpExchangeTest } = require("./test-sdp-exchange");
 const { runDataChannelTest } = require("./test-interop");
+const { runAudioSdpTest } = require("./test-audio-sdp");
 
 async function runAllTests() {
   console.log("=== WebRTC Zig Interop Tests ===\n");
@@ -27,6 +28,18 @@ async function runAllTests() {
   console.log("Test 2: Full Data Channel Interop");
   try {
     await runDataChannelTest();
+    passed++;
+  } catch (err) {
+    console.error(`  ❌ FAILED: ${err.message}`);
+    failed++;
+  }
+
+  console.log("");
+
+  // Test 3: Audio SDP Interop (Opus codec negotiation)
+  console.log("Test 3: Audio SDP Interop (Opus codec negotiation)");
+  try {
+    await runAudioSdpTest();
     passed++;
   } catch (err) {
     console.error(`  ❌ FAILED: ${err.message}`);

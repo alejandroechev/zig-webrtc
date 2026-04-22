@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head><title>WebRTC Interop Test</title></head>
+<body>
+  <h1>WebRTC Zig Interop Test</h1>
+  <div id="status">Connecting to signaling server...</div>
+  <div id="connection-state">Connection: new</div>
+  <div id="ice-state">ICE: new</div>
+  <div id="messages"></div>
+  <button id="sendBtn" disabled>Send "Hello from browser!"</button>
+
+  <script>
+    const status = document.getElementById('status');
+    const connState = document.getElementById('connection-state');
+    const iceState = document.getElementById('ice-state');
+    const messages = document.getElementById('messages');
+    const sendBtn = document.getElementById('sendBtn');
+
+    const ws = new WebSocket('ws://localhost:8080');
+    let pc, dc;
+
+    ws.onopen = () => {
+      status.textContent = 'Connected to signaling server. Waiting for Zig peer...';
+
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      pc.onconnectionstatechange = () => {
+        connState.textContent = 'Connection: ' + pc.connectionState;
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        iceState.textContent = 'ICE: ' + pc.iceConnectionState;
+      };
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          ws.send(JSON.stringify({ type: 'ice-candidate', candidate: e.candidate }));
+        }
+      };
+
+      pc.ondatachannel = (e) => {
+        dc = e.channel;
+        setupDataChannel(dc);
+      };
+    };
+
+    ws.onmessage = async (e) => {
+      const msg = JSON.parse(e.data);
+
+      if (msg.type === 'offer') {
+        status.textContent = 'Received offer from Zig peer';
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+        status.textContent = 'Sent answer, waiting for ICE...';
+      }
+
+      if (msg.type === 'ice-candidate' && msg.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+      }
+    };
+
+    function setupDataChannel(channel) {
+      channel.onopen = () => {
+        status.textContent = 'Data channel open!';
+        sendBtn.disabled = false;
+        channel.send('Hello from browser!');
+        addMessage('Sent: Hello from browser!');
+      };
+
+      channel.onmessage = (e) => {
+        addMessage('Received: ' + e.data);
+        document.body.setAttribute('data-received', e.data);
+      };
+
+      channel.onerror = (e) => addMessage('Error: ' + e.message);
+      channel.onclose = () => addMessage('Channel closed');
+    }
+
+    sendBtn.onclick = () => {
+      if (dc && dc.readyState === 'open') {
+        dc.send('Hello from browser!');
+        addMessage('Sent: Hello from browser!');
+      }
+    };
+
+    function addMessage(text) {
+      const div = document.createElement('div');
+      div.textContent = new Date().toISOString().substr(11, 8) + ' ' + text;
+      messages.appendChild(div);
+    }
+  </script>
+</body>
+</html>

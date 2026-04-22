@@ -1,0 +1,7 @@
+{
+  "name": "zig-webrtc-interop",
+  "private": true,
+  "dependencies": {
+    "ws": "^8.0.0"
+  }
+}

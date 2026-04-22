@@ -103,6 +103,15 @@ pub const Config = struct {
     ice_transport_policy: IceTransportPolicy = .all,
 };
 
+/// Media types for audio/video tracks.
+pub const MediaType = enum { audio, video };
+
+/// A media track added to the PeerConnection (carries SSRC for RTP).
+pub const MediaTrack = struct {
+    media_type: MediaType,
+    ssrc: u32,
+};
+
 /// Data channel creation options.
 pub const DataChannelOptions = struct {
     ordered: bool = true,
@@ -137,6 +146,10 @@ pub const PeerConnection = struct {
     local_pwd: [24]u8,
     offer_count: u64,
 
+    // Media tracks
+    audio_track: ?MediaTrack,
+    video_track: ?MediaTrack,
+
     // Backing buffer for SDP text (kept alive so slices in SessionDescription remain valid)
     sdp_buf: ?[]u8,
 
@@ -159,6 +172,8 @@ pub const PeerConnection = struct {
             .local_ufrag = generateCredential(8),
             .local_pwd = generateCredential(24),
             .offer_count = 0,
+            .audio_track = null,
+            .video_track = null,
             .sdp_buf = null,
             .on_ice_candidate = null,
             .on_connection_state_change = null,
@@ -281,6 +296,18 @@ pub const PeerConnection = struct {
         try self.ice_agent.addRemoteCandidate(candidate);
     }
 
+    // ── Media Tracks ──────────────────────────────────────────────────
+
+    /// Add an audio track (Opus) with the given SSRC.
+    pub fn addAudioTrack(self: *PeerConnection, ssrc: u32) void {
+        self.audio_track = MediaTrack{ .media_type = .audio, .ssrc = ssrc };
+    }
+
+    /// Add a video track (VP8) with the given SSRC.
+    pub fn addVideoTrack(self: *PeerConnection, ssrc: u32) void {
+        self.video_track = MediaTrack{ .media_type = .video, .ssrc = ssrc };
+    }
+
     // ── Lifecycle ──────────────────────────────────────────────────────
 
     /// Close the PeerConnection (RFC 9429 §4.1).
@@ -336,14 +363,37 @@ pub const PeerConnection = struct {
         var list: std.ArrayList(u8) = .empty;
         errdefer list.deinit(self.allocator);
 
+        // Compute MID assignments: audio=0, video=1 (if audio), datachannel=last
+        var next_mid: u32 = 0;
+        const audio_mid = if (self.audio_track != null) blk: {
+            const m = next_mid;
+            next_mid += 1;
+            break :blk m;
+        } else null;
+        const video_mid = if (self.video_track != null) blk: {
+            const m = next_mid;
+            next_mid += 1;
+            break :blk m;
+        } else null;
+        const dc_mid = next_mid;
+
         // Session-level lines
         list.appendSlice(self.allocator, "v=0\r\n") catch return PeerError.SdpGenerationFailed;
         list.print(self.allocator, "o=- {d} {d} IN IP4 127.0.0.1\r\n", .{ self.offer_count, self.offer_count }) catch
             return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "s=-\r\n") catch return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "t=0 0\r\n") catch return PeerError.SdpGenerationFailed;
-        // BUNDLE group (RFC 9429 §5.2.1)
-        list.appendSlice(self.allocator, "a=group:BUNDLE 0\r\n") catch return PeerError.SdpGenerationFailed;
+
+        // BUNDLE group (RFC 9429 §5.2.1) — list all MIDs
+        list.appendSlice(self.allocator, "a=group:BUNDLE") catch return PeerError.SdpGenerationFailed;
+        if (audio_mid) |mid| {
+            list.print(self.allocator, " {d}", .{mid}) catch return PeerError.SdpGenerationFailed;
+        }
+        if (video_mid) |mid| {
+            list.print(self.allocator, " {d}", .{mid}) catch return PeerError.SdpGenerationFailed;
+        }
+        list.print(self.allocator, " {d}\r\n", .{dc_mid}) catch return PeerError.SdpGenerationFailed;
+
         // ICE credentials
         list.print(self.allocator, "a=ice-ufrag:{s}\r\n", .{self.local_ufrag}) catch
             return PeerError.SdpGenerationFailed;
@@ -351,11 +401,35 @@ pub const PeerConnection = struct {
             return PeerError.SdpGenerationFailed;
         // a=setup:actpass for offers (RFC 9429 §5.2.1)
         list.appendSlice(self.allocator, "a=setup:actpass\r\n") catch return PeerError.SdpGenerationFailed;
+
+        // Audio m= line (Opus)
+        if (self.audio_track) |track| {
+            list.appendSlice(self.allocator, "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "c=IN IP4 0.0.0.0\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=mid:{d}\r\n", .{audio_mid.?}) catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtpmap:111 opus/48000/2\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=fmtp:111 minptime=10;useinbandfec=1\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:111 nack\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=ssrc:{d} cname:zig-webrtc\r\n", .{track.ssrc}) catch return PeerError.SdpGenerationFailed;
+        }
+
+        // Video m= line (VP8)
+        if (self.video_track) |track| {
+            list.appendSlice(self.allocator, "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "c=IN IP4 0.0.0.0\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=mid:{d}\r\n", .{video_mid.?}) catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtpmap:96 VP8/90000\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:96 nack\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:96 nack pli\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:96 ccm fir\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=ssrc:{d} cname:zig-webrtc\r\n", .{track.ssrc}) catch return PeerError.SdpGenerationFailed;
+        }
+
         // Data channel m= line (application using DTLS/SCTP)
         list.appendSlice(self.allocator, "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n") catch
             return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "c=IN IP4 0.0.0.0\r\n") catch return PeerError.SdpGenerationFailed;
-        list.appendSlice(self.allocator, "a=mid:0\r\n") catch return PeerError.SdpGenerationFailed;
+        list.print(self.allocator, "a=mid:{d}\r\n", .{dc_mid}) catch return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "a=sctp-port:5000\r\n") catch return PeerError.SdpGenerationFailed;
 
         // Keep the SDP text alive so parsed slices remain valid
@@ -377,22 +451,70 @@ pub const PeerConnection = struct {
         var list: std.ArrayList(u8) = .empty;
         errdefer list.deinit(self.allocator);
 
+        // Compute MID assignments (same logic as offer)
+        var next_mid: u32 = 0;
+        const audio_mid = if (self.audio_track != null) blk: {
+            const m = next_mid;
+            next_mid += 1;
+            break :blk m;
+        } else null;
+        const video_mid = if (self.video_track != null) blk: {
+            const m = next_mid;
+            next_mid += 1;
+            break :blk m;
+        } else null;
+        const dc_mid = next_mid;
+
         list.appendSlice(self.allocator, "v=0\r\n") catch return PeerError.SdpGenerationFailed;
         list.print(self.allocator, "o=- {d} 1 IN IP4 127.0.0.1\r\n", .{self.offer_count}) catch
             return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "s=-\r\n") catch return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "t=0 0\r\n") catch return PeerError.SdpGenerationFailed;
-        list.appendSlice(self.allocator, "a=group:BUNDLE 0\r\n") catch return PeerError.SdpGenerationFailed;
+
+        list.appendSlice(self.allocator, "a=group:BUNDLE") catch return PeerError.SdpGenerationFailed;
+        if (audio_mid) |mid| {
+            list.print(self.allocator, " {d}", .{mid}) catch return PeerError.SdpGenerationFailed;
+        }
+        if (video_mid) |mid| {
+            list.print(self.allocator, " {d}", .{mid}) catch return PeerError.SdpGenerationFailed;
+        }
+        list.print(self.allocator, " {d}\r\n", .{dc_mid}) catch return PeerError.SdpGenerationFailed;
+
         list.print(self.allocator, "a=ice-ufrag:{s}\r\n", .{self.local_ufrag}) catch
             return PeerError.SdpGenerationFailed;
         list.print(self.allocator, "a=ice-pwd:{s}\r\n", .{self.local_pwd}) catch
             return PeerError.SdpGenerationFailed;
         // a=setup:active for answers (RFC 9429 §5.3.1)
         list.appendSlice(self.allocator, "a=setup:active\r\n") catch return PeerError.SdpGenerationFailed;
+
+        // Audio m= line (Opus)
+        if (self.audio_track) |track| {
+            list.appendSlice(self.allocator, "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "c=IN IP4 0.0.0.0\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=mid:{d}\r\n", .{audio_mid.?}) catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtpmap:111 opus/48000/2\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=fmtp:111 minptime=10;useinbandfec=1\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:111 nack\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=ssrc:{d} cname:zig-webrtc\r\n", .{track.ssrc}) catch return PeerError.SdpGenerationFailed;
+        }
+
+        // Video m= line (VP8)
+        if (self.video_track) |track| {
+            list.appendSlice(self.allocator, "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "c=IN IP4 0.0.0.0\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=mid:{d}\r\n", .{video_mid.?}) catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtpmap:96 VP8/90000\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:96 nack\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:96 nack pli\r\n") catch return PeerError.SdpGenerationFailed;
+            list.appendSlice(self.allocator, "a=rtcp-fb:96 ccm fir\r\n") catch return PeerError.SdpGenerationFailed;
+            list.print(self.allocator, "a=ssrc:{d} cname:zig-webrtc\r\n", .{track.ssrc}) catch return PeerError.SdpGenerationFailed;
+        }
+
+        // Data channel m= line
         list.appendSlice(self.allocator, "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n") catch
             return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "c=IN IP4 0.0.0.0\r\n") catch return PeerError.SdpGenerationFailed;
-        list.appendSlice(self.allocator, "a=mid:0\r\n") catch return PeerError.SdpGenerationFailed;
+        list.print(self.allocator, "a=mid:{d}\r\n", .{dc_mid}) catch return PeerError.SdpGenerationFailed;
         list.appendSlice(self.allocator, "a=sctp-port:5000\r\n") catch return PeerError.SdpGenerationFailed;
 
         const sdp_text = list.toOwnedSlice(self.allocator) catch return PeerError.OutOfMemory;
@@ -895,4 +1017,199 @@ test "RFC9429: addIceCandidate adds to ICE agent" {
     try pc.addIceCandidate(candidate);
 
     try testing.expectEqual(@as(usize, 1), pc.ice_agent.remote_candidates.items.len);
+}
+
+// ============================================================================
+// Tests — Media Tracks & SDP Audio/Video Negotiation
+// ============================================================================
+
+test "SDP: createOffer with audio track produces audio m= line" {
+    var pc = PeerConnection.init(testing.allocator, .{});
+    defer pc.deinit();
+
+    pc.addAudioTrack(12345);
+
+    const offer = try pc.createOffer();
+    defer @constCast(&offer).deinit(testing.allocator);
+
+    // Should have 2 media sections: audio + datachannel
+    try testing.expectEqual(@as(usize, 2), offer.media.len);
+    try testing.expectEqualStrings("audio", offer.media[0].media_type);
+    try testing.expectEqualStrings("UDP/TLS/RTP/SAVPF", offer.media[0].proto);
+    try testing.expectEqualStrings("111", offer.media[0].formats[0]);
+    try testing.expectEqualStrings("application", offer.media[1].media_type);
+}
+
+test "SDP: createOffer with video track produces video m= line" {
+    var pc = PeerConnection.init(testing.allocator, .{});
+    defer pc.deinit();
+
+    pc.addVideoTrack(12346);
+
+    const offer = try pc.createOffer();
+    defer @constCast(&offer).deinit(testing.allocator);
+
+    // Should have 2 media sections: video + datachannel
+    try testing.expectEqual(@as(usize, 2), offer.media.len);
+    try testing.expectEqualStrings("video", offer.media[0].media_type);
+    try testing.expectEqualStrings("UDP/TLS/RTP/SAVPF", offer.media[0].proto);
+    try testing.expectEqualStrings("96", offer.media[0].formats[0]);
+    try testing.expectEqualStrings("application", offer.media[1].media_type);
+}
+
+test "SDP: createOffer with audio+video produces correct m= lines and MIDs" {
+    var pc = PeerConnection.init(testing.allocator, .{});
+    defer pc.deinit();
+
+    pc.addAudioTrack(12345);
+    pc.addVideoTrack(12346);
+
+    const offer = try pc.createOffer();
+    defer @constCast(&offer).deinit(testing.allocator);
+
+    // Should have 3 media sections: audio, video, datachannel
+    try testing.expectEqual(@as(usize, 3), offer.media.len);
+    try testing.expectEqualStrings("audio", offer.media[0].media_type);
+    try testing.expectEqualStrings("video", offer.media[1].media_type);
+    try testing.expectEqualStrings("application", offer.media[2].media_type);
+
+    // Verify BUNDLE group includes all MIDs
+    var has_bundle_012 = false;
+    for (offer.attributes) |attr| {
+        if (std.mem.eql(u8, attr.name, "group")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "BUNDLE 0 1 2")) has_bundle_012 = true;
+            }
+        }
+    }
+    try testing.expect(has_bundle_012);
+
+    // Verify MIDs: audio=0, video=1, datachannel=2
+    var audio_mid: ?[]const u8 = null;
+    for (offer.media[0].attributes) |attr| {
+        if (std.mem.eql(u8, attr.name, "mid")) audio_mid = attr.value;
+    }
+    try testing.expectEqualStrings("0", audio_mid.?);
+
+    var video_mid: ?[]const u8 = null;
+    for (offer.media[1].attributes) |attr| {
+        if (std.mem.eql(u8, attr.name, "mid")) video_mid = attr.value;
+    }
+    try testing.expectEqualStrings("1", video_mid.?);
+
+    var dc_mid: ?[]const u8 = null;
+    for (offer.media[2].attributes) |attr| {
+        if (std.mem.eql(u8, attr.name, "mid")) dc_mid = attr.value;
+    }
+    try testing.expectEqualStrings("2", dc_mid.?);
+}
+
+test "SDP: audio codec attributes (rtpmap, fmtp, rtcp-fb)" {
+    var pc = PeerConnection.init(testing.allocator, .{});
+    defer pc.deinit();
+
+    pc.addAudioTrack(12345);
+
+    const offer = try pc.createOffer();
+    defer @constCast(&offer).deinit(testing.allocator);
+
+    const audio = offer.media[0];
+    var has_rtpmap = false;
+    var has_fmtp = false;
+    var has_nack = false;
+    var has_ssrc = false;
+    for (audio.attributes) |attr| {
+        if (std.mem.eql(u8, attr.name, "rtpmap")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "111 opus/48000/2")) has_rtpmap = true;
+            }
+        }
+        if (std.mem.eql(u8, attr.name, "fmtp")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "111 minptime=10;useinbandfec=1")) has_fmtp = true;
+            }
+        }
+        if (std.mem.eql(u8, attr.name, "rtcp-fb")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "111 nack")) has_nack = true;
+            }
+        }
+        if (std.mem.eql(u8, attr.name, "ssrc")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "12345 cname:zig-webrtc")) has_ssrc = true;
+            }
+        }
+    }
+    try testing.expect(has_rtpmap);
+    try testing.expect(has_fmtp);
+    try testing.expect(has_nack);
+    try testing.expect(has_ssrc);
+}
+
+test "SDP: video codec attributes (rtpmap, rtcp-fb nack/pli/fir)" {
+    var pc = PeerConnection.init(testing.allocator, .{});
+    defer pc.deinit();
+
+    pc.addVideoTrack(12346);
+
+    const offer = try pc.createOffer();
+    defer @constCast(&offer).deinit(testing.allocator);
+
+    const video = offer.media[0]; // only video + dc, so video is [0]
+    var has_rtpmap = false;
+    var has_nack = false;
+    var has_nack_pli = false;
+    var has_ccm_fir = false;
+    var has_ssrc = false;
+    for (video.attributes) |attr| {
+        if (std.mem.eql(u8, attr.name, "rtpmap")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "96 VP8/90000")) has_rtpmap = true;
+            }
+        }
+        if (std.mem.eql(u8, attr.name, "rtcp-fb")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "96 nack")) has_nack = true;
+                if (std.mem.eql(u8, v, "96 nack pli")) has_nack_pli = true;
+                if (std.mem.eql(u8, v, "96 ccm fir")) has_ccm_fir = true;
+            }
+        }
+        if (std.mem.eql(u8, attr.name, "ssrc")) {
+            if (attr.value) |v| {
+                if (std.mem.eql(u8, v, "12346 cname:zig-webrtc")) has_ssrc = true;
+            }
+        }
+    }
+    try testing.expect(has_rtpmap);
+    try testing.expect(has_nack);
+    try testing.expect(has_nack_pli);
+    try testing.expect(has_ccm_fir);
+    try testing.expect(has_ssrc);
+}
+
+test "SDP: no tracks produces datachannel-only offer (backward compat)" {
+    var pc = PeerConnection.init(testing.allocator, .{});
+    defer pc.deinit();
+
+    const offer = try pc.createOffer();
+    defer @constCast(&offer).deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), offer.media.len);
+    try testing.expectEqualStrings("application", offer.media[0].media_type);
+}
+
+test "SDP: addAudioTrack / addVideoTrack store tracks correctly" {
+    var pc = PeerConnection.init(testing.allocator, .{});
+    defer pc.deinit();
+
+    try testing.expect(pc.audio_track == null);
+    try testing.expect(pc.video_track == null);
+
+    pc.addAudioTrack(1000);
+    try testing.expectEqual(@as(u32, 1000), pc.audio_track.?.ssrc);
+    try testing.expectEqual(MediaType.audio, pc.audio_track.?.media_type);
+
+    pc.addVideoTrack(2000);
+    try testing.expectEqual(@as(u32, 2000), pc.video_track.?.ssrc);
+    try testing.expectEqual(MediaType.video, pc.video_track.?.media_type);
 }

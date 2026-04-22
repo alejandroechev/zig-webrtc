@@ -15,6 +15,8 @@ pub const sctp = @import("sctp/sctp.zig");
 pub const datachannel = @import("datachannel/datachannel.zig");
 pub const peer = @import("peer/peer.zig");
 pub const transport = @import("transport/transport.zig");
+pub const codec = @import("codec/codec.zig");
+pub const media = @import("media/media.zig");
 
 test {
     // Run all module tests

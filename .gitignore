@@ -1,3 +1,6 @@
 zig-cache/
 zig-out/
 .zig-cache/
+
+test_out.txt
+test_err.txt

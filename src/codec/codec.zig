@@ -1,11 +1,11 @@
 //! Codec bindings for WebRTC audio and video.
 //!
 //! - Opus (RFC 6716) — mandatory audio codec (RFC 7874)
-//! - VP8 — mandatory video codec (RFC 7742) — DISABLED: vpx.lib /GL incompatible with Zig LLD
+//! - VP8 — mandatory video codec (RFC 7742)
 
 pub const opus = @import("opus.zig");
-// pub const vpx = @import("vpx.zig"); // TODO: rebuild libvpx without /GL
+pub const vpx = @import("vpx.zig");
 
 test {
-    _ = opus;
+    @import("std").testing.refAllDecls(@This());
 }
